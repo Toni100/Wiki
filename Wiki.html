@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+<head>
+<script>
+
+var wiki = {
+ index: {},
+ blockSize: 14000000
+};
+
+wiki.addToIndex = function(title, start, end) {
+ wiki.index[title] = [start, end];
+};
+
+wiki.updateStatus = function() {
+ var length = Object.keys(wiki.index).length;
+ var dropbox = document.getElementById('dropbox');
+ dropbox.innerHTML = '<br/>' + wiki.file.name + ' (' + length + ' articles)';
+};
+
+wiki.decodeCharacters = function(txt) {
+ var s = '';
+ for(var i = 0; i < txt.length; i++) {
+  s += '%' + ('0' + txt.charCodeAt(i).toString(16)).slice(-2);
+ };
+ s = decodeURIComponent(s);
+ return s;
+};
+
+wiki.updateIndex = function() {
+ wiki.index = {};
+ wiki.updateStatus();
+ var start = 0;
+ var reader = new FileReader();
+ reader.onload = function(event) {
+  var txt = event.target.result;
+  var searched = 0;
+  var re = /<page>[\d\D]*?<title>(.+?)<\/title>[\d\D]*?<ns>(\d+)<\/ns>[\d\D]*?<\/page>/g;
+  var arr;
+  while(arr = re.exec(txt)) {
+   var ns = arr[2];
+   if(ns == '0') {
+    var title = wiki.decodeCharacters(arr[1]);
+    wiki.addToIndex(title, start + re.lastIndex - arr[0].length, start + re.lastIndex);
+   };
+   searched = re.lastIndex;
+  };
+  if(searched > 0) {
+   start += searched;
+   if(wiki.file.size > start) {
+    reader.readAsBinaryString(wiki.file.slice(start, start + wiki.blockSize));
+   };
+  };
+  wiki.updateStatus();
+ };
+ reader.readAsBinaryString(wiki.file.slice(start, start + wiki.blockSize));
+};
+
+wiki.drop = function(event) {
+ event.preventDefault();
+ wiki.file = event.dataTransfer.files[0];
+ wiki.updateIndex();
+};
+
+wiki.showTitle = function(rawText) {
+ title = document.getElementById('title');
+ title.innerHTML = '';
+ title.appendChild(document.createTextNode(rawText));
+};
+
+wiki.fixCharacters = function(txt) {
+ return txt.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+};
+
+wiki.parse = function(txt) {
+ var newText = txt;
+
+ // links
+ newText = newText.replace(
+  /\[\[([^\|\[\]]+?)\|([^\|\[\]]+?)\]\]/g,
+  '<a href=\'javascript:wiki.search(\"$1\")\'>$2</a>'
+ );
+ newText = newText.replace(
+  /\[\[([^\|\[\]]+?)\]\]/g,
+  '<a href=\'javascript:wiki.search(\"$1\")\'>$1</a>'
+ );
+
+ // headings
+ newText = newText.replace(/======(.+?)======/g, '<h6>$1</h6>');
+ newText = newText.replace(/=====(.+?)=====/g, '<h5>$1</h5>');
+ newText = newText.replace(/====(.+?)====/g, '<h4>$1</h4>');
+ newText = newText.replace(/===(.+?)===/g, '<h3>$1</h3>');
+ newText = newText.replace(/==(.+?)==/g, '<h2>$1</h2>');
+
+ // linebreaks
+ newText = newText.replace(/\n+/g, '<br/>');
+
+ // bold & italic
+ newText = newText.replace(/'''([^']+?)'''/g, '<b>$1</b>');
+ newText = newText.replace(/''([^']+?)''/g, '<i>$1</i>');
+
+ return newText;
+};
+
+wiki.showBody = function(rawText) {
+ var txt = rawText;
+ txt = wiki.fixCharacters(txt);
+ txt = wiki.parse(txt);
+ document.getElementById('body').innerHTML = txt;
+};
+
+wiki.show = function(start, end) {
+ var reader = new FileReader();
+ reader.onload = function(event) {
+  var txt = event.target.result;
+  var re = /<title>(.+?)<\/title>[\d\D]*?<text xml:space="preserve">([\d\D]+?)<\/text>/;
+  var arr = re.exec(txt);
+  wiki.showTitle(arr[1]);
+  wiki.showBody(arr[2]);
+ };
+ reader.readAsText(wiki.file.slice(start, end));
+};
+
+wiki.exactSearch = function(search) {
+ var result = wiki.index[search];
+ if(!result) {
+  var lower = search.toLowerCase();
+  for(var key in wiki.index) {
+   if(key.toLowerCase() == lower) {
+    result = wiki.index[key];
+    break;
+   };
+  };
+ };
+ return result;
+};
+
+wiki.search = function(search) {
+ var suggest = document.getElementById('suggest');
+ suggest.innerHTML = '';
+ var value = wiki.exactSearch(search);
+ if(value) {
+  wiki.show(value[0], value[1]);
+ } else if(search.length > 0) {
+  var lower = search.toLowerCase();
+  var keys = Object.keys(wiki.index).filter(
+   function(s) {
+    return s.toLowerCase().indexOf(lower) != -1;
+   }
+  );
+  var links = '';
+  var length = keys.length;
+  for(var i = 0; i < length; i++) {
+   links += '<a href=\'javascript:wiki.search(\"' + keys[i] + '\")\'>' + keys[i] + '</a><br/>';
+  };
+  suggest.innerHTML = links;
+ };
+};
+
+</script>
+</head>
+<body>
+
+<div id='dropbox' ondragenter='return false' ondragover='return false' ondrop='wiki.drop(event)'
+ style='background-color:#66BBFF; text-align:center; height:60px; width:63%; float:left'>
+ <br/>
+ drop wiki here
+</div>
+<div style='background-color:#FFAA55; text-align:center; height:60px; width:37%; float:left'>
+ <br>
+ <form name='searchForm' method='post'
+  onsubmit='wiki.search(document.forms["searchForm"]["searchInput"].value); return false'>
+  <input name='searchInput' type='text' placeholder='Search' autofocus>
+  <input type='submit' value='Search'>
+ </form>
+</div>
+<div id='suggest' style='background-color:#33FF44; width:37%; float:right'></div>
+<br/>
+<br/>
+<br/>
+<h1 id='title'></h1>
+<p id='body'></p>
+
+</body>
+</html>
